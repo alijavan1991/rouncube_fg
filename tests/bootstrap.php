@@ -20,6 +20,7 @@ register_shutdown_function(static function () use ($root) {
 putenv('ZZDLP_TEST_DIR=' . $root);
 putenv('ZZDLP_TEST_DES_KEY=' . bin2hex(random_bytes(12)));
 
+define('ROUNDCUBE_TEST_SESSION', 'zemzemeh-dlp-test-session');
 define('INSTALL_PATH', rtrim(getenv('ROUNDCUBE_PATH') ?: '/usr/src/roundcubemail', '/') . '/');
 define('ZZDLP_PLUGIN_DIR', dirname(__DIR__) . '/');
 putenv('RCUBE_CONFIG_PATH=' . INSTALL_PATH . 'config' . PATH_SEPARATOR . __DIR__ . '/config');
