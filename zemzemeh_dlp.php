@@ -1,7 +1,11 @@
 <?php
 
 require_once __DIR__ . '/lib/Audit.php';
+require_once __DIR__ . '/lib/Client.php';
 require_once __DIR__ . '/lib/Guard.php';
+require_once __DIR__ . '/lib/ProvenanceStore.php';
+require_once __DIR__ . '/lib/SessionToken.php';
+require_once __DIR__ . '/lib/Spool.php';
 
 /**
  * Zemzemeh attachment DLP for Roundcube.

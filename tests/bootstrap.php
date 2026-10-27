@@ -26,6 +26,7 @@ define('ZZDLP_PLUGIN_DIR', dirname(__DIR__) . '/');
 putenv('RCUBE_CONFIG_PATH=' . INSTALL_PATH . 'config' . PATH_SEPARATOR . __DIR__ . '/config');
 
 require INSTALL_PATH . 'program/include/iniset.php';
+require __DIR__ . '/fixtures/FakeOauth.php';
 
 // Roundcube's SQLite driver creates its own schema for a new database file on connect.
 $db = rcube_db::factory('sqlite:///' . $root . '/roundcube.db?mode=0600');
