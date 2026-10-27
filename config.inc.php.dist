@@ -1,0 +1,34 @@
+<?php
+
+// Copy to config.inc.php and adjust. This file holds no secrets: the plugin uses
+// the signed-in user's own OAuth token, never a service credential.
+
+// Base URL of the Zemzemeh backend, reachable from the Roundcube server only.
+// Nginx should restrict /api/mail/ to Roundcube's source addresses.
+$config['zemzemeh_dlp_api_url'] = 'https://files.example.com';
+
+// Verify Zemzemeh's TLS certificate. Never disable in production.
+$config['zemzemeh_dlp_verify_tls'] = true;
+
+// Timeout for each Zemzemeh request, in seconds.
+$config['zemzemeh_dlp_timeout'] = 30;
+
+// Refresh the session token when it expires within this many seconds.
+$config['zemzemeh_dlp_token_margin'] = 30;
+
+// How long an attachment approval stays valid (seconds). Drafts reopened later
+// must re-attach the file from Zemzemeh.
+$config['zemzemeh_dlp_provenance_ttl'] = 28800;
+
+// Operator-approved system parts allowed in outgoing mail without Zemzemeh
+// provenance, e.g. a signature logo: [['sha256' => '<hex>', 'mimetype' => 'image/png']].
+$config['zemzemeh_dlp_system_assets'] = [];
+
+// Extra plugins that must not be enabled together with this one (the built-in
+// list already covers zipdownload, vcard_attachments, enigma, database_attachments
+// and redundant_attachments).
+$config['zemzemeh_dlp_denied_plugins'] = [];
+
+// Grace period (seconds) before bin/gc.php removes spool files that have no
+// provenance row. The spool is Roundcube's temp_dir, which must be private.
+$config['zemzemeh_dlp_gc_grace'] = 900;

@@ -1,0 +1,8 @@
+# docker compose -f tests/docker/compose.yml run --rm tests
+services:
+  tests:
+    build:
+      context: .
+    network_mode: bridge
+    volumes:
+      - ../..:/usr/src/roundcubemail/plugins/zemzemeh_dlp

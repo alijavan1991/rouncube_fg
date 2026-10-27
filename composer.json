@@ -1,0 +1,22 @@
+{
+    "name": "zemzemeh/roundcube-dlp",
+    "type": "roundcube-plugin",
+    "description": "Makes Zemzemeh the only source and destination of Roundcube mail attachments, with server-side provenance enforced before sending.",
+    "require": {
+        "php": ">=8.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.4.27"
+        },
+        "sort-packages": true
+    },
+    "autoload": {
+        "classmap": [
+            "zemzemeh_dlp.php"
+        ]
+    }
+}
