@@ -1,7 +1,7 @@
 # zemzemeh_dlp — Roundcube attachment DLP for Zemzemeh
 
-Roundcube plugin that makes [Zemzemeh](https://files.example.com) the only source and
-destination of mail attachments:
+Roundcube plugin that makes Zemzemeh, a self-hosted encrypted file workspace, the only
+source and destination of mail attachments:
 
 - outgoing attachments are picked from Zemzemeh and transferred server-to-server;
 - local uploads (file picker, drag-and-drop, paste, direct requests) are refused;
