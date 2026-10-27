@@ -6,30 +6,21 @@ final class ClientTest extends TestCase
 {
     private const TOKEN = 'stub-bearer-token';
 
-    private static $server;
+    private static StubServer $server;
     private static string $url;
     private static string $log;
     private zemzemeh_dlp_spool $spool;
 
     public static function setUpBeforeClass(): void
     {
-        self::$log = getenv('ZZDLP_TEST_DIR') . '/stub.log';
-        $socket = stream_socket_server('tcp://127.0.0.1:0');
-        $port = (int) substr(strrchr(stream_socket_get_name($socket, false), ':'), 1);
-        fclose($socket);
-        self::$url = "http://127.0.0.1:{$port}";
-        self::$server = proc_open([PHP_BINARY, '-S', "127.0.0.1:{$port}", __DIR__ . '/fixtures/zemzemeh_stub.php'],
-            [['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w']], $pipes, null,
-            ['STUB_LOG' => self::$log]);
-        for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $port); $i++) {
-            usleep(100000);
-        }
+        self::$server = new StubServer();
+        self::$url = self::$server->url;
+        self::$log = self::$server->log;
     }
 
     public static function tearDownAfterClass(): void
     {
-        proc_terminate(self::$server);
-        proc_close(self::$server);
+        self::$server->stop();
     }
 
     protected function setUp(): void
