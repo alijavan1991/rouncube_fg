@@ -74,8 +74,11 @@
             ['add-attachment', 'upload-file', 'send-attachment'].forEach(function (command) {
                 rcmail.enable_command(command, false);
             });
-            document.querySelectorAll('#uploadform, #compose-attachments .upload, a.button.attach, a.attach')
+            document.querySelectorAll('#uploadform, #compose-attachments .upload, #compose-attachments .upload-form, a.button.attach, a.attach')
                 .forEach(function (node) { node.style.display = 'none'; });
+            // Elastic draws the drop zone (dashed border and icon) from these classes.
+            document.querySelectorAll('.droptarget, .file-upload')
+                .forEach(function (node) { node.classList.remove('droptarget', 'file-upload'); });
 
             var list = rcmail.gui_objects.attachmentlist, button = document.createElement('button');
             button.type = 'button';
