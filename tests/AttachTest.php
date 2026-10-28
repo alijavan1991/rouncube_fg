@@ -4,61 +4,7 @@ use PHPUnit\Framework\TestCase;
 
 final class AttachTest extends TestCase
 {
-    private const TOKEN = 'attach-bearer-token';
-    private const FILE = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-
-    private static StubServer $server;
-    private rcmail $rcmail;
-    private zemzemeh_dlp $plugin;
-    private $original_oauth;
-    private $original_user;
-    private string $log;
-
-    public static function setUpBeforeClass(): void
-    {
-        self::$server = new StubServer();
-    }
-
-    public static function tearDownAfterClass(): void
-    {
-        self::$server->stop();
-    }
-
-    protected function setUp(): void
-    {
-        self::$server->reset();
-        $this->rcmail = rcmail::get_instance();
-        $this->rcmail->task = 'mail';
-        $this->plugin = $this->rcmail->plugins->get_plugin('zemzemeh_dlp');
-        $this->original_oauth = $this->rcmail->oauth;
-        $this->original_user = $this->rcmail->user;
-        $this->rcmail->oauth = new FakeOauth();
-        $this->rcmail->config->set('zemzemeh_dlp_api_url', self::$server->url);
-        $this->rcmail->config->set('max_message_size', '10M');
-
-        $db = $this->rcmail->get_dbh();
-        $db->query('INSERT INTO ' . $db->table_name('users', true) . " (`username`, `mail_host`, `created`) VALUES (?, 'localhost', "
-            . $db->now() . ')', 'attach' . bin2hex(random_bytes(4)));
-        $this->rcmail->set_user(new rcube_user((int) $db->insert_id('users')));
-
-        $_SESSION = [
-            'password' => $this->rcmail->encrypt('Bearer ' . self::TOKEN),
-            'oauth_token' => ['expires' => time() + 200, 'identity' => ['sub' => 'sub-attach']],
-            'compose_data_c1' => ['id' => 'c1', 'param' => []],
-        ];
-        $_POST = $_GET = [];
-        $_SERVER['REQUEST_METHOD'] = 'POST';
-        $this->log = getenv('ZZDLP_TEST_DIR') . '/logs/zemzemeh_dlp.log';
-        @unlink($this->log);
-    }
-
-    protected function tearDown(): void
-    {
-        $this->rcmail->oauth = $this->original_oauth;
-        $this->rcmail->user = $this->original_user;
-        $_SESSION = $_POST = $_GET = [];
-        unset($_SERVER['REQUEST_METHOD']);
-    }
+    use ComposeFixture;
 
     private function refused(string $reason, callable $call): void
     {
@@ -68,31 +14,6 @@ final class AttachTest extends TestCase
         } catch (zemzemeh_dlp_attach_exception $e) {
             $this->assertSame($reason, $e->reason);
         }
-    }
-
-    private function events(): array
-    {
-        preg_match_all('/(\{.*\})$/m', is_file($this->log) ? file_get_contents($this->log) : '', $lines);
-
-        return array_map(static fn ($line) => json_decode($line, true), $lines[1]);
-    }
-
-    private function spooled(): array
-    {
-        return glob($this->rcmail->config->get('temp_dir') . '/RCMTEMPzzdlp*');
-    }
-
-    private function provenance(): array
-    {
-        $db = $this->rcmail->get_dbh();
-        $result = $db->query('SELECT * FROM ' . $db->table_name('zemzemeh_dlp_provenance', true) . ' WHERE `user_id` = ?',
-            $this->rcmail->user->ID);
-        $rows = [];
-        while ($row = $db->fetch_assoc($result)) {
-            $rows[] = $row;
-        }
-
-        return $rows;
     }
 
     public function testListsMetadataOnlyWithTheUsersToken(): void
@@ -123,7 +44,7 @@ final class AttachTest extends TestCase
         $this->assertSame('alice', $row['zz_owner']);
         $this->assertSame(str_repeat('1', 64), $row['zz_version']);
         $this->assertSame(hash('sha256', 'hello world'), $row['sha256']);
-        $this->assertSame('sub-attach', $row['oidc_sub']);
+        $this->assertSame('sub-compose', $row['oidc_sub']);
         $this->assertSame(hash('sha256', ROUNDCUBE_TEST_SESSION), $row['session_hash']);
         $this->assertSame(basename($uploads[0]['path']), $row['spool_name']);
         $this->assertSame('approved', $row['decision']);
@@ -144,7 +65,7 @@ final class AttachTest extends TestCase
         $this->refused('forged', fn () => $this->plugin->attach_from_request());
 
         $_SERVER['REQUEST_METHOD'] = 'POST';
-        foreach (['c2', '../c1', '', str_repeat('9', 200)] as $compose) {
+        foreach (['c3', '../c1', '', str_repeat('9', 200)] as $compose) {
             $this->refused('forged', fn () => $this->plugin->attach($compose, self::FILE));
         }
         $_GET = ['_id' => 'c1', '_file_id' => self::FILE];

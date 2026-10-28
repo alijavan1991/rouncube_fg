@@ -28,6 +28,7 @@ putenv('RCUBE_CONFIG_PATH=' . INSTALL_PATH . 'config' . PATH_SEPARATOR . __DIR__
 require INSTALL_PATH . 'program/include/iniset.php';
 require __DIR__ . '/fixtures/FakeOauth.php';
 require __DIR__ . '/fixtures/StubServer.php';
+require __DIR__ . '/fixtures/ComposeFixture.php';
 
 // Roundcube's SQLite driver creates its own schema for a new database file on connect.
 $db = rcube_db::factory('sqlite:///' . $root . '/roundcube.db?mode=0600');

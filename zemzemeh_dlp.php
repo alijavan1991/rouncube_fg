@@ -3,6 +3,7 @@
 require_once __DIR__ . '/lib/Audit.php';
 require_once __DIR__ . '/lib/Client.php';
 require_once __DIR__ . '/lib/Guard.php';
+require_once __DIR__ . '/lib/MimeInspector.php';
 require_once __DIR__ . '/lib/ProvenanceStore.php';
 require_once __DIR__ . '/lib/SessionToken.php';
 require_once __DIR__ . '/lib/Spool.php';
@@ -45,6 +46,7 @@ class zemzemeh_dlp extends rcube_plugin
 
     private ?string $blocked = null;
     private bool $inserting = false;
+    private ?array $approved = null;
 
     #[\Override]
     public function init()
@@ -63,6 +65,8 @@ class zemzemeh_dlp extends rcube_plugin
         $this->add_hook('message_part_get', [$this, 'deny_part']);
         $this->add_hook('message_compose', [$this, 'compose']);
         $this->add_hook('zemzemeh_dlp_insert', [$this, 'insert_own']);
+        $this->add_hook('message_before_send', [$this, 'before_send']);
+        $this->add_hook('message_sent', [$this, 'sent']);
         $this->register_action('plugin.zemzemeh_dlp.blocked', [$this, 'blocked']);
         $this->register_action('plugin.zemzemeh_dlp.list', [$this, 'action_list']);
         $this->register_action('plugin.zemzemeh_dlp.attach', [$this, 'action_attach']);
@@ -218,6 +222,137 @@ class zemzemeh_dlp extends rcube_plugin
         $args['attachments'] = [];
 
         return $args;
+    }
+
+    // ------------------------------------------------------------ Send-time enforcement
+
+    /**
+     * Final gate before SMTP: every non-body part must match an unexpired approval of this
+     * compose session by SHA-256, and Zemzemeh must still confirm access and version.
+     */
+    public function before_send(array $args): array
+    {
+        $rcmail = rcmail::get_instance();
+        $this->approved = null;
+        $action = self::canonical_action((string) $rcmail->action);
+        $message = $args['message'] ?? null;
+        if ($action !== 'send' && $action !== 'sendmdn') {
+            return $this->refuse_send($args, 'action');
+        }
+        // Subclasses (e.g. the bounce message) serialize differently or only once.
+        if (!is_object($message) || get_class($message) !== Mail_mime::class) {
+            return $this->refuse_send($args, 'message_class');
+        }
+
+        $inspection = zemzemeh_dlp_mime_inspector::inspect($message, $action === 'sendmdn');
+        if ($inspection['problem']) {
+            return $this->refuse_send($args, $inspection['problem']);
+        }
+        $parts = [];
+        foreach ($inspection['parts'] as $part) {
+            if ($this->is_system_asset($part)) {
+                zemzemeh_dlp_audit::log('system_asset_allowed', ['sha256' => $part['sha256'], 'mimetype' => $part['mimetype']]);
+            } else {
+                $parts[] = $part;
+            }
+        }
+        if (!$parts) {
+            return $args;
+        }
+        if ($action !== 'send') {
+            return $this->refuse_send($args, 'unproven');
+        }
+
+        $compose_id = (string) rcube_utils::get_input_string('_id', rcube_utils::INPUT_GPC);
+        if (!preg_match('/^[0-9A-Za-z.]{1,128}$/', $compose_id) || empty($_SESSION['compose_data_' . $compose_id])) {
+            return $this->refuse_send($args, 'compose');
+        }
+        if (!$this->is_active()) {
+            return $this->refuse_send($args, 'inactive');
+        }
+
+        // Match parts to approvals one-to-one by content hash.
+        $rows = (new zemzemeh_dlp_provenance_store($rcmail->get_dbh()))->for_compose(
+            (int) $rcmail->user->ID, zemzemeh_dlp_provenance_store::session_hash($rcmail->get_session_id()), $compose_id);
+        $matched = [];
+        foreach ($parts as $part) {
+            foreach ($rows as $i => $row) {
+                if (hash_equals($row['sha256'], $part['sha256'])) {
+                    $matched[] = $row;
+                    unset($rows[$i]);
+                    continue 2;
+                }
+            }
+
+            return $this->refuse_send($args, $rows ? 'hash_mismatch' : 'unproven', $rows ? 'hash_mismatch' : 'blocked_send');
+        }
+
+        try {
+            [$client] = $this->client();
+        } catch (zemzemeh_dlp_attach_exception $e) {
+            return $this->refuse_send($args, $e->reason);
+        }
+        foreach ($matched as $row) {
+            try {
+                $meta = $client->metadata($row['zz_file_id']);
+            } catch (zemzemeh_dlp_client_exception $e) {
+                return match ($e->kind) {
+                    'not_found' => $this->refuse_send($args, 'access_revoked', 'permission_denied', ['file_id' => $row['zz_file_id']]),
+                    'auth' => $this->refuse_send($args, 'auth'),
+                    default => $this->refuse_send($args, 'unavailable'),
+                };
+            }
+            if (!hash_equals($row['zz_version'], $meta['version'])) {
+                return $this->refuse_send($args, 'version_changed', 'hash_mismatch', ['file_id' => $row['zz_file_id']]);
+            }
+        }
+
+        $this->approved = ['message' => spl_object_id($message), 'compose_id' => $compose_id, 'rows' => $matched];
+
+        return $args;
+    }
+
+    /**
+     * After SMTP accepted the message: consume its approvals and record the send.
+     */
+    public function sent(array $args): array
+    {
+        $approved = $this->approved;
+        $this->approved = null;
+        if (!$approved || !is_object($args['message'] ?? null) || spl_object_id($args['message']) !== $approved['message']) {
+            return $args;
+        }
+        $store = new zemzemeh_dlp_provenance_store(rcmail::get_instance()->get_dbh());
+        foreach ($approved['rows'] as $row) {
+            $store->consume((int) $row['id']);
+        }
+        zemzemeh_dlp_audit::log('send_approved', [
+            'compose_id' => $approved['compose_id'],
+            'file_ids' => array_column($approved['rows'], 'zz_file_id'),
+            'sha256' => array_column($approved['rows'], 'sha256'),
+        ]);
+
+        return $args;
+    }
+
+    private function refuse_send(array $args, string $reason, string $event = 'blocked_send', array $fields = []): array
+    {
+        zemzemeh_dlp_audit::log($event, ['reason' => $reason] + $fields);
+
+        return ['abort' => true, 'result' => false, 'error' => $this->gettext('sendblocked'), 'break' => true] + $args;
+    }
+
+    private function is_system_asset(array $part): bool
+    {
+        foreach ((array) rcmail::get_instance()->config->get('zemzemeh_dlp_system_assets', []) as $asset) {
+            if (is_array($asset) && is_string($asset['sha256'] ?? null) && is_string($asset['mimetype'] ?? null)
+                    && hash_equals(strtolower($asset['sha256']), $part['sha256'])
+                    && strtolower($asset['mimetype']) === $part['mimetype']) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ------------------------------------------------------------ Attach from Zemzemeh

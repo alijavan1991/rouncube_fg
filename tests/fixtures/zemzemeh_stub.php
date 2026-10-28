@@ -18,7 +18,10 @@ $files = [
     str_repeat('f', 32) => [$meta(str_repeat('f', 32), 5), 'hello world', V1],       // longer than announced
     str_repeat('9', 32) => [$meta(str_repeat('9', 32), 20), 'hello world', V1],      // truncated stream
     str_repeat('8', 32) => [$meta(str_repeat('8', 32), 4096), str_repeat('x', 4096), V1],
+    str_repeat('7', 32) => [$meta(str_repeat('7', 32), 11), 'hello world', V1],       // access revoked after download
+    str_repeat('6', 32) => [$meta(str_repeat('6', 32), 11), 'hello world', V1],       // replaced after download
 ];
+$served = static fn (string $id) => getenv('STUB_LOG') . ".served-{$id}";
 $json = static function (int $status, $body): void {
     http_response_code($status);
     header('Content-Type: application/json');
@@ -39,11 +42,12 @@ if ($id === str_repeat('c', 32)) {
     $json(401, ['detail' => 'Token not issued for the mail integration']);
 } elseif ($id === str_repeat('d', 32)) {
     $json(500, ['detail' => 'boom']);
-} elseif (!isset($files[$id])) {
+} elseif (!isset($files[$id]) || ($id === str_repeat('7', 32) && is_file($served($id)))) {
     $json(404, ['detail' => 'File not found']);
 } elseif (!$content) {
-    $json(200, $files[$id][0]);
+    $json(200, $id === str_repeat('6', 32) && is_file($served($id)) ? ['version' => V2] + $files[$id][0] : $files[$id][0]);
 } else {
+    touch($served($id));
     [$info, $body, $version] = $files[$id];
     header('Content-Type: application/pdf');
     header('X-Zemzemeh-Version: ' . $version);

@@ -30,6 +30,7 @@ final class StubServer
     public function reset(): void
     {
         @unlink($this->log);
+        array_map('unlink', glob($this->log . '.served-*'));
     }
 
     public function stop(): void
