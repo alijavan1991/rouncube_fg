@@ -76,8 +76,8 @@ final class SpoolTest extends TestCase
         $this->assertTrue($this->spool->delete($name));
 
         $stuck = 'RCMTEMPzzdlp' . str_repeat('b', 32);
-        mkdir($this->dir . '/' . $stuck);  // unlink() cannot remove a directory
-        $this->assertFalse(@$this->spool->delete($stuck));
+        mkdir($this->dir . '/' . $stuck);  // a directory is refused, never removed
+        $this->assertFalse($this->spool->delete($stuck));
         rmdir($this->dir . '/' . $stuck);
     }
 

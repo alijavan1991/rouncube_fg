@@ -3,7 +3,7 @@
 use GuzzleHttp\Exception\GuzzleException;
 
 /**
- * A Zemzemeh failure. `kind` is one of: auth, not_found, too_large, changed, unavailable.
+ * A Zemzemeh failure. `kind` is one of: auth, not_found, too_large, changed, quota, unavailable.
  * Messages never contain token material or response bodies.
  */
 final class zemzemeh_dlp_client_exception extends RuntimeException
@@ -115,6 +115,35 @@ final class zemzemeh_dlp_client
         }
     }
 
+    /**
+     * Save a spooled file as a new file of the token's user (Save to Zemzemeh).
+     *
+     * @return array the new file's metadata
+     */
+    public function upload(string $path, string $name, string $content_type): array
+    {
+        if (!$handle = fopen($path, 'rb')) {
+            throw new zemzemeh_dlp_client_exception('unavailable', 'Could not read spool file');
+        }
+        try {
+            $response = $this->request('/api/mail/files', method: 'POST', options: ['multipart' => [[
+                'name' => 'upload', 'contents' => $handle, 'headers' => ['Content-Type' => $content_type],
+                // Guzzle quotes the filename without escaping and keeps only its basename.
+                'filename' => strtr($name, ['"' => '_', '\\' => '_', '/' => '_']),
+            ]]], expect: 201);
+        } finally {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+        }
+        $meta = json_decode((string) $response->getBody(), true);
+        if (!self::valid_meta($meta)) {
+            throw new zemzemeh_dlp_client_exception('unavailable', 'Unexpected Zemzemeh response');
+        }
+
+        return $meta;
+    }
+
     private static function file_id(string $file_id): string
     {
         // Ids are only ever path segments built here; anything else is refused before a request.
@@ -144,21 +173,23 @@ final class zemzemeh_dlp_client
         return $data;
     }
 
-    private function request(string $path, bool $stream = false)
+    private function request(string $path, bool $stream = false, string $method = 'GET', array $options = [], int $expect = 200)
     {
         try {
-            $response = $this->http->request('GET', $this->base . $path, [
+            $response = $this->http->request($method, $this->base . $path, [
                 'headers' => ['Authorization' => 'Bearer ' . $this->token, 'Accept' => 'application/json, */*'],
                 'stream' => $stream,
-            ]);
+            ] + $options);
         } catch (GuzzleException) {
             throw new zemzemeh_dlp_client_exception('unavailable', 'Zemzemeh is unavailable');
         }
 
         return match ($response->getStatusCode()) {
-            200 => $response,
+            $expect => $response,
             401, 403 => throw new zemzemeh_dlp_client_exception('auth', 'Zemzemeh refused the session token'),
             404 => throw new zemzemeh_dlp_client_exception('not_found', 'File not found'),
+            413 => throw new zemzemeh_dlp_client_exception('too_large', 'File exceeds the Zemzemeh upload limit'),
+            507 => throw new zemzemeh_dlp_client_exception('quota', 'Zemzemeh storage quota exceeded'),
             default => throw new zemzemeh_dlp_client_exception('unavailable', 'Zemzemeh is unavailable'),
         };
     }

@@ -29,6 +29,24 @@ $json = static function (int $status, $body): void {
 };
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($path === '/api/mail/files' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Save to Zemzemeh: the uploaded filename selects the outcome.
+    $upload = $_FILES['upload'] ?? null;
+    if (!$upload || $upload['error'] !== UPLOAD_ERR_OK) {
+        $json(400, ['detail' => 'Missing or incomplete upload']);
+        return true;
+    }
+    $data = file_get_contents($upload['tmp_name']);
+    file_put_contents(getenv('STUB_LOG'), 'UPLOAD ' . json_encode([$upload['name'], $upload['type'], strlen($data),
+        hash('sha256', $data), count($_FILES), array_keys($_POST)]) . "
+", FILE_APPEND);
+    $status = ['quota.pdf' => 507, 'large.pdf' => 413, 'slow.pdf' => 408, 'auth.pdf' => 401, 'off.pdf' => 404,
+        'boom.pdf' => 500, 'odd.pdf' => 201][$upload['name']] ?? 201;
+    $saved = ['version' => V1] + $meta(str_repeat('b', 32), strlen($data));
+    $saved['name'] = $upload['name'];
+    $json($status, $status !== 201 ? ['detail' => 'refused'] : ($upload['name'] === 'odd.pdf' ? ['id' => 'x'] : $saved));
+    return true;
+}
 if ($path === '/api/mail/files') {
     $json(200, [$files[str_repeat('a', 32)][0]]);
     return true;

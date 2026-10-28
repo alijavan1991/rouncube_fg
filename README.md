@@ -11,10 +11,12 @@ source and destination of mail attachments:
 It controls the Roundcube attachment channel only. It does not prevent copying text,
 screenshots, other mail clients or other exfiltration from the endpoint.
 
-**Status:** outgoing enforcement implemented and unit-tested (delivery Tasks 4-9):
-blocking, Attach from Zemzemeh, send-time provenance checks, draft re-proving, cleanup
-and GC. Not yet verified against a live Roundcube/Keycloak/Zemzemeh stack (Task 11), and
-Save to Zemzemeh is a later increment; do not deploy yet. Design and plan live in the Zemzemeh repository:
+**Status:** outgoing enforcement (blocking, Attach from Zemzemeh, send-time provenance
+checks, draft re-proving, cleanup and GC) is implemented, unit-tested and verified on a
+live Roundcube/Keycloak/Dovecot/Zemzemeh acceptance stack. Save to Zemzemeh (a button on
+each received attachment; IMAP part → private spool → Zemzemeh `POST /api/mail/files`,
+never through the browser) is implemented and unit-tested. Attachment preview stays
+excluded: any rendering in the browser puts the data on the endpoint. Design and plan live in the Zemzemeh repository:
 `docs/superpowers/specs/2026-10-27-roundcube-zemzemeh-dlp-design.md` and
 `docs/superpowers/plans/2026-10-27-roundcube-zemzemeh-dlp.md`.
 

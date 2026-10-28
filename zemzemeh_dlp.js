@@ -1,7 +1,8 @@
 /**
- * Compose integration. Hiding local upload controls is cosmetic: the server refuses every
- * local upload path (picker, drag-and-drop, paste, direct requests) regardless of this script.
- * The Zemzemeh picker sends only a compose id and a file id; the server fetches the file.
+ * Compose and message-view integration. Hiding local upload and download controls is cosmetic:
+ * the server refuses every local upload and download path regardless of this script.
+ * The Zemzemeh picker sends only a compose id and a file id; Save to Zemzemeh sends only the
+ * message coordinates. The server moves the bytes in both directions.
  */
 (function () {
     function label(name) {
@@ -68,9 +69,49 @@
         }]);
     }
 
+    // Message view: each attachment row gets Save to Zemzemeh; the server copies the part
+    // from IMAP to Zemzemeh, so the browser sends only the message coordinates.
+    function addSaveButtons() {
+        var list = rcmail.gui_objects.attachments;
+        Object.keys(rcmail.env.attachments || {}).forEach(function (part) {
+            var row = document.getElementById('attach' + part), button = document.createElement('button');
+            if (!row) {
+                return;
+            }
+            button.type = 'button';
+            button.className = 'button zemzemeh-dlp-save';
+            button.textContent = label('savetozemzemeh');
+            button.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                button.disabled = true;
+                rcmail.http_post('plugin.zemzemeh_dlp.save',
+                    { _mbox: rcmail.env.mailbox, _uid: rcmail.env.uid, _part: part }, rcmail.set_busy(true, 'loading'));
+            });
+            row.appendChild(button);
+        });
+        // Opening an attachment would download it, which the server refuses; say why instead.
+        if (list) {
+            list.addEventListener('click', function (event) {
+                if (event.target.closest('a')) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    rcmail.display_message(label('downloadblocked'), 'warning');
+                }
+            }, true);
+        }
+        rcmail.addEventListener('responseafterplugin.zemzemeh_dlp.save', function () {
+            document.querySelectorAll('.zemzemeh-dlp-save').forEach(function (button) { button.disabled = false; });
+        });
+    }
+
     if (window.rcmail) {
         rcmail.addEventListener('plugin.zemzemeh_dlp_files', showPicker);
         rcmail.addEventListener('init', function () {
+            if (rcmail.env.action === 'show' || rcmail.env.action === 'preview') {
+                addSaveButtons();
+                return;
+            }
             ['add-attachment', 'upload-file', 'send-attachment'].forEach(function (command) {
                 rcmail.enable_command(command, false);
             });

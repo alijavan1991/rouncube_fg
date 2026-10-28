@@ -70,6 +70,9 @@ final class zemzemeh_dlp_spool
         if (!file_exists($path) && !is_link($path)) {
             return true;
         }
+        if (is_dir($path) && !is_link($path)) {
+            return false;
+        }
 
         return unlink($path);
     }

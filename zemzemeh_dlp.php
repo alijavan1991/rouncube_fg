@@ -4,6 +4,7 @@ require_once __DIR__ . '/lib/Audit.php';
 require_once __DIR__ . '/lib/Client.php';
 require_once __DIR__ . '/lib/Gc.php';
 require_once __DIR__ . '/lib/Guard.php';
+require_once __DIR__ . '/lib/MessageSource.php';
 require_once __DIR__ . '/lib/MimeInspector.php';
 require_once __DIR__ . '/lib/ProvenanceStore.php';
 require_once __DIR__ . '/lib/SessionToken.php';
@@ -50,6 +51,9 @@ class zemzemeh_dlp extends rcube_plugin
     private bool $dropped_notice = false;
     private ?array $approved = null;
 
+    /** Where Save to Zemzemeh reads incoming parts; replaced in tests. */
+    public ?zemzemeh_dlp_message_source $message_source = null;
+
     #[\Override]
     public function init()
     {
@@ -74,9 +78,10 @@ class zemzemeh_dlp extends rcube_plugin
         $this->register_action('plugin.zemzemeh_dlp.blocked', [$this, 'blocked']);
         $this->register_action('plugin.zemzemeh_dlp.list', [$this, 'action_list']);
         $this->register_action('plugin.zemzemeh_dlp.attach', [$this, 'action_attach']);
+        $this->register_action('plugin.zemzemeh_dlp.save', [$this, 'action_save']);
 
-        if ($rcmail->task === 'mail' && $rcmail->action === 'compose') {
-            $this->add_label('localuploadblocked', 'attachfromzemzemeh', 'pickerempty');
+        if ($rcmail->task === 'mail' && in_array($rcmail->action, ['compose', 'show', 'preview'], true)) {
+            $this->add_label('localuploadblocked', 'attachfromzemzemeh', 'pickerempty', 'savetozemzemeh', 'downloadblocked');
             $this->include_script('zemzemeh_dlp.js');
         }
     }
@@ -645,6 +650,115 @@ class zemzemeh_dlp extends rcube_plugin
             $rcmail->output->show_message($this->error_message($e->reason), 'error');
         }
         $rcmail->output->send();
+    }
+
+    // ------------------------------------------------------------ Save to Zemzemeh
+
+    /**
+     * Save from a browser request: POST only, message coordinates from the body. The name and
+     * type sent to Zemzemeh come from the message structure, never from the browser.
+     */
+    public function save_from_request(): array
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            zemzemeh_dlp_audit::log('blocked_forged_request', ['reason' => 'method']);
+            throw new zemzemeh_dlp_attach_exception('forged');
+        }
+
+        return $this->save_attachment(
+            (string) rcube_utils::get_input_string('_mbox', rcube_utils::INPUT_POST, true),
+            (string) rcube_utils::get_input_string('_uid', rcube_utils::INPUT_POST),
+            (string) rcube_utils::get_input_string('_part', rcube_utils::INPUT_POST)
+        );
+    }
+
+    /**
+     * Copy one attachment part of a message in the user's mailbox into the user's Zemzemeh
+     * files: IMAP -> private spool -> Zemzemeh. The browser never receives the bytes.
+     *
+     * @return array{id: string, name: string}
+     */
+    public function save_attachment(string $mbox, string $uid, string $mime_id): array
+    {
+        $rcmail = rcmail::get_instance();
+        if ($mbox === '' || strlen($mbox) > 1024 || preg_match('/[\x00-\x1F\x7F]/', $mbox)
+                || !preg_match('/^[1-9][0-9]{0,19}$/', $uid) || !preg_match('/^[0-9]{1,9}(\.[0-9]{1,9}){0,31}$/', $mime_id)) {
+            zemzemeh_dlp_audit::log('blocked_forged_request', ['reason' => 'part']);
+            throw new zemzemeh_dlp_attach_exception('forged');
+        }
+        [$client] = $this->client();
+        $messages = $this->message_source ??= new zemzemeh_dlp_message_source();
+        if (!$part = $messages->attachment($mbox, $uid, $mime_id)) {
+            zemzemeh_dlp_audit::log('permission_denied', ['reason' => 'part']);
+            throw new zemzemeh_dlp_attach_exception('not_found');
+        }
+
+        $spool = new zemzemeh_dlp_spool((string) $rcmail->config->get('temp_dir'));
+        [$name, $handle] = $spool->create();
+        try {
+            $written = $messages->write($mbox, $uid, $mime_id, $handle);
+            $closed = fclose($handle);
+            $handle = null;
+            if (!$written || !$closed) {
+                throw new zemzemeh_dlp_attach_exception('storage');
+            }
+            try {
+                $path = $spool->path($name);
+            } catch (InvalidArgumentException) {
+                throw new zemzemeh_dlp_attach_exception('storage');
+            }
+            $sha256 = hash_file('sha256', $path);
+            $size = filesize($path);
+            if ($sha256 === false || $size === false) {
+                throw new zemzemeh_dlp_attach_exception('storage');
+            }
+            try {
+                $saved = $client->upload($path, self::clean_name($part['name']), self::clean_type($part['mimetype']));
+            } catch (zemzemeh_dlp_client_exception $e) {
+                match ($e->kind) {
+                    'quota' => zemzemeh_dlp_audit::log('quota_denied', ['size' => $size]),
+                    'auth', 'not_found' => zemzemeh_dlp_audit::log('permission_denied', ['reason' => $e->kind]),
+                    default => null,
+                };
+                throw new zemzemeh_dlp_attach_exception($e->kind);
+            }
+            zemzemeh_dlp_audit::log('attachment_saved', [
+                'file_id' => $saved['id'], 'version' => $saved['version'], 'sha256' => $sha256, 'size' => $size]);
+
+            return ['id' => $saved['id'], 'name' => $saved['name']];
+        } finally {
+            if ($handle) {
+                fclose($handle);
+            }
+            if (!$spool->delete($name)) {
+                zemzemeh_dlp_audit::log('cleanup_failed', ['reason' => 'save_spool']);
+            }
+        }
+    }
+
+    public function action_save(): void
+    {
+        $rcmail = rcmail::get_instance();
+        try {
+            $this->save_from_request();
+            $rcmail->output->show_message($this->gettext('savedtozemzemeh'), 'confirmation');
+        } catch (zemzemeh_dlp_attach_exception $e) {
+            $rcmail->output->show_message($this->save_error_message($e->reason), 'error');
+        }
+        $rcmail->output->send();
+    }
+
+    private function save_error_message(string $reason): string
+    {
+        return $this->gettext(match ($reason) {
+            'auth' => 'signinagain',
+            'not_found' => 'savenotallowed',
+            'quota' => 'quotaexceeded',
+            'too_large' => 'savetoolarge',
+            'inactive' => 'savenotavailable',
+            'forged' => 'requestrefused',
+            default => 'zemzemehunavailable',
+        });
     }
 
     /** Bytes still allowed by max_message_size, using Roundcube's own estimate. */
