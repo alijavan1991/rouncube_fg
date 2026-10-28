@@ -13,6 +13,10 @@ $config['zemzemeh_dlp_verify_tls'] = true;
 // Timeout for each Zemzemeh request, in seconds.
 $config['zemzemeh_dlp_timeout'] = 30;
 
+// Hard cap for an incoming IMAP part spooled by Save to Zemzemeh. The plugin reads
+// at most one byte beyond this limit and refuses before starting an upload.
+$config['zemzemeh_dlp_save_max_bytes'] = 25 * 1024 * 1024;
+
 // Refresh the session token when it expires within this many seconds.
 $config['zemzemeh_dlp_token_margin'] = 30;
 

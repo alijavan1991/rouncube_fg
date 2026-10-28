@@ -15,7 +15,9 @@ screenshots, other mail clients or other exfiltration from the endpoint.
 checks, draft re-proving, cleanup and GC) is implemented, unit-tested and verified on a
 live Roundcube/Keycloak/Dovecot/Zemzemeh acceptance stack. Save to Zemzemeh (a button on
 each received attachment; IMAP part → private spool → Zemzemeh `POST /api/mail/files`,
-never through the browser) is implemented and unit-tested. Attachment preview stays
+never through the browser) is implemented and unit-tested. Its decoded IMAP read is
+hard-capped by `zemzemeh_dlp_save_max_bytes` (25 MiB by default), reads only one byte
+beyond the cap to detect overflow, and refuses before upload. Attachment preview stays
 excluded: any rendering in the browser puts the data on the endpoint. Design and plan live in the Zemzemeh repository:
 `docs/superpowers/specs/2026-10-27-roundcube-zemzemeh-dlp-design.md` and
 `docs/superpowers/plans/2026-10-27-roundcube-zemzemeh-dlp.md`.
@@ -33,6 +35,7 @@ excluded: any rendering in the browser puts the data on the endpoint. Design and
 
 1. Copy or check out this repository as `plugins/zemzemeh_dlp`.
 2. Copy `config.inc.php.dist` to `config.inc.php` and set `zemzemeh_dlp_api_url`.
+   Set `zemzemeh_dlp_save_max_bytes` at or below Zemzemeh's `MAX_UPLOAD_BYTES`.
 3. Create the table: `bin/initdb.sh --dir=plugins/zemzemeh_dlp/SQL`.
 4. Add `zemzemeh_dlp` to `$config['plugins']`.
 5. Run the cleanup every few minutes as the PHP user, e.g.

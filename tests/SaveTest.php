@@ -132,6 +132,18 @@ final class SaveTest extends TestCase
         $this->assertSame([], $this->spooled());
     }
 
+    public function testSaveRefusesOversizedPartBeforeUploadAndBoundsTheSpool(): void
+    {
+        $this->rcmail->config->set('zemzemeh_dlp_save_max_bytes', 8);
+
+        $this->refused('too_large', fn () => $this->plugin->save_attachment('INBOX', '5', '2'));
+
+        $this->assertSame(1, $this->messages->writes);
+        $this->assertSame(9, $this->messages->last_max_bytes);
+        $this->assertSame([], $this->uploads());
+        $this->assertSame([], $this->spooled());
+    }
+
     public function testFailedSpoolCleanupIsAudited(): void
     {
         $this->messages->sabotage = true;

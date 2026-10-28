@@ -696,7 +696,10 @@ class zemzemeh_dlp extends rcube_plugin
         $spool = new zemzemeh_dlp_spool((string) $rcmail->config->get('temp_dir'));
         [$name, $handle] = $spool->create();
         try {
-            $written = $messages->write($mbox, $uid, $mime_id, $handle);
+            $max_bytes = min(\PHP_INT_MAX - 1,
+                max(1, (int) $rcmail->config->get('zemzemeh_dlp_save_max_bytes', 25 * 1024 * 1024)));
+            // Read one extra byte so a truncated IMAP fetch is distinguishable from an exact-size part.
+            $written = $messages->write($mbox, $uid, $mime_id, $handle, $max_bytes + 1);
             $closed = fclose($handle);
             $handle = null;
             if (!$written || !$closed) {
@@ -711,6 +714,9 @@ class zemzemeh_dlp extends rcube_plugin
             $size = filesize($path);
             if ($sha256 === false || $size === false) {
                 throw new zemzemeh_dlp_attach_exception('storage');
+            }
+            if ($size > $max_bytes) {
+                throw new zemzemeh_dlp_attach_exception('too_large');
             }
             try {
                 $saved = $client->upload($path, self::clean_name($part['name']), self::clean_type($part['mimetype']));

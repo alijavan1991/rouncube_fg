@@ -7,6 +7,7 @@
 final class FakeMessages extends zemzemeh_dlp_message_source
 {
     public int $writes = 0;
+    public ?int $last_max_bytes = null;
     public bool $sabotage = false;
 
     public function __construct(private array $messages)
@@ -22,11 +23,19 @@ final class FakeMessages extends zemzemeh_dlp_message_source
     }
 
     #[\Override]
-    public function write(string $mbox, string $uid, string $mime_id, $fp): bool
+    public function write(string $mbox, string $uid, string $mime_id, $fp, int $max_bytes = 0): bool
     {
         $this->writes++;
+        $this->last_max_bytes = $max_bytes;
         $part = $this->messages["{$mbox}/{$uid}"][$mime_id] ?? null;
-        if ($part === null || fwrite($fp, $part['body']) !== strlen($part['body'])) {
+        $body = $part['body'] ?? null;
+        if ($body === null) {
+            return false;
+        }
+        if ($max_bytes > 0) {
+            $body = substr($body, 0, $max_bytes);
+        }
+        if (fwrite($fp, $body) !== strlen($body)) {
             return false;
         }
         if ($this->sabotage) {

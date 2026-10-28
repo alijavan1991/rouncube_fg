@@ -20,11 +20,11 @@ class zemzemeh_dlp_message_source
     }
 
     /** Stream the decoded part into `$fp`. */
-    public function write(string $mbox, string $uid, string $mime_id, $fp): bool
+    public function write(string $mbox, string $uid, string $mime_id, $fp, int $max_bytes = 0): bool
     {
         $found = $this->part($mbox, $uid, $mime_id);
 
-        return $found !== null && $found[0]->get_part_body($mime_id, false, 0, $fp) !== false;
+        return $found !== null && $found[0]->get_part_body($mime_id, false, $max_bytes, $fp) !== false;
     }
 
     /** @return ?array{0: rcube_message, 1: rcube_message_part} */
