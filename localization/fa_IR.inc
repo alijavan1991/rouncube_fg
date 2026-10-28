@@ -16,3 +16,4 @@ $messages['filechanged'] = 'فایل هنگام پیوست شدن در زمزم�
 $messages['notavailable'] = 'پیوست از زمزمه در دسترس نیست. با مدیر سامانه تماس بگیرید.';
 $messages['requestrefused'] = 'درخواست پذیرفته نشد.';
 $messages['zemzemehunavailable'] = 'اکنون دسترسی به زمزمه ممکن نیست. بعداً دوباره تلاش کنید.';
+$messages['attachmentsdropped'] = 'برخی پیوست‌ها حذف شدند، چون از زمزمه نبودند یا دیگر در آن در دسترس نیستند.';

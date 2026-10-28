@@ -16,3 +16,4 @@ $messages['filechanged'] = 'The file changed in Zemzemeh while it was being atta
 $messages['notavailable'] = 'Attaching from Zemzemeh is not available. Contact your administrator.';
 $messages['requestrefused'] = 'The request was refused.';
 $messages['zemzemehunavailable'] = 'Zemzemeh is not reachable right now. Try again later.';
+$messages['attachmentsdropped'] = 'Some attachments were removed because they did not come from Zemzemeh or are no longer available there.';

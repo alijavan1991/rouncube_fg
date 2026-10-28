@@ -67,6 +67,19 @@ final class zemzemeh_dlp_provenance_store
         return $this->db->fetch_assoc($result) ?: null;
     }
 
+    /**
+     * Newest unexpired approval of this user for these bytes, in any compose or session
+     * (consumed ones included: a sent message's attachment came from Zemzemeh too).
+     */
+    public function reprovable(int $user_id, string $sha256): ?array
+    {
+        $result = $this->db->limitquery(
+            "SELECT * FROM {$this->table()} WHERE `user_id` = ? AND `sha256` = ? AND `expires_at` > {$this->db->now()}"
+            . ' ORDER BY `id` DESC', 0, 1, $user_id, $sha256);
+
+        return $this->db->fetch_assoc($result) ?: null;
+    }
+
     public function consume(int $id): bool
     {
         $result = $this->db->query(

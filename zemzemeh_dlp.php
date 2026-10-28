@@ -46,6 +46,7 @@ class zemzemeh_dlp extends rcube_plugin
 
     private ?string $blocked = null;
     private bool $inserting = false;
+    private bool $dropped_notice = false;
     private ?array $approved = null;
 
     #[\Override]
@@ -59,7 +60,7 @@ class zemzemeh_dlp extends rcube_plugin
 
         $this->add_hook('ready', [$this, 'ready']);
         $this->add_hook('attachment_upload', [$this, 'deny_upload']);
-        $this->add_hook('attachment_save', [$this, 'deny_save']);
+        $this->add_hook('attachment_save', [$this, 'save']);
         $this->add_hook('attachment_from_uri', [$this, 'deny_from_uri']);
         $this->add_hook('attachment_display', [$this, 'deny_display']);
         $this->add_hook('message_part_get', [$this, 'deny_part']);
@@ -179,13 +180,111 @@ class zemzemeh_dlp extends rcube_plugin
         return ['error' => $this->gettext('localuploadblocked')] + self::DENY + $args;
     }
 
-    // Forwarded, draft and inline attachments; Zemzemeh-proven ones are re-admitted in a later increment.
-    public function deny_save(array $args): array
+    /**
+     * Attachments Roundcube re-reads from stored messages (reopened drafts, edit as new,
+     * forwards, inline images). Admitted only when the bytes match a live approval of this
+     * user that Zemzemeh still confirms; they then get a new spool file and approval for
+     * this compose. Everything else is dropped.
+     */
+    public function save(array $args): array
     {
-        if (rcmail::get_instance()->task !== 'mail') {
+        $rcmail = rcmail::get_instance();
+        if ($rcmail->task !== 'mail') {
             return $args;
         }
-        zemzemeh_dlp_audit::log('blocked_send', ['hook' => 'attachment_save', 'reason' => 'unproven_attachment']);
+        $compose_id = (string) ($args['group'] ?? '');
+        if (empty($rcmail->user->ID) || !preg_match('/^[0-9A-Za-z.]{1,128}$/', $compose_id)) {
+            return $this->drop_saved($args, 'unproven_attachment');
+        }
+
+        // Bytes come from the message part (`data`) or a Roundcube temp file; nothing else is read.
+        $temp_dir = realpath((string) $rcmail->config->get('temp_dir'));
+        $source = null;
+        if (is_string($args['data'] ?? null) && $args['data'] !== '') {
+            $sha256 = hash('sha256', $args['data']);
+        } elseif (is_string($args['path'] ?? null) && !is_link($args['path']) && is_file($args['path'])
+                && $temp_dir !== false && dirname((string) realpath($args['path'])) === $temp_dir) {
+            $source = $args['path'];
+            $sha256 = hash_file('sha256', $source);
+        } else {
+            return $this->drop_saved($args, 'unproven_attachment');
+        }
+
+        $store = new zemzemeh_dlp_provenance_store($rcmail->get_dbh());
+        $row = $store->reprovable((int) $rcmail->user->ID, $sha256);
+        if (!$row) {
+            return $this->drop_saved($args, 'unproven_attachment');
+        }
+        try {
+            [$client, $subject] = $this->client();
+            $meta = $client->metadata($row['zz_file_id']);
+        } catch (zemzemeh_dlp_attach_exception $e) {
+            return $this->drop_saved($args, $e->reason);
+        } catch (zemzemeh_dlp_client_exception $e) {
+            return $this->drop_saved($args, $e->kind === 'not_found' ? 'access_revoked' : $e->kind);
+        }
+        if (!hash_equals($row['zz_version'], $meta['version'])) {
+            return $this->drop_saved($args, 'version_changed');
+        }
+
+        $spool = new zemzemeh_dlp_spool($temp_dir);
+        [$name, $handle] = $spool->create();
+        if ($source === null) {
+            $written = fwrite($handle, $args['data']);
+        } else {
+            $input = fopen($source, 'r');
+            $written = $input ? stream_copy_to_stream($input, $handle) : false;
+            if ($input) {
+                fclose($input);
+            }
+        }
+        fclose($handle);
+        $path = $spool->path($name);
+        // The source could have changed since it was hashed; the spool copy is what gets sent.
+        if ($written === false || !hash_equals($sha256, hash_file('sha256', $path))) {
+            $spool->delete($name);
+
+            return $this->drop_saved($args, 'storage');
+        }
+
+        $id = $this->new_upload_id();
+        $attachment = ['name' => self::clean_name((string) ($args['name'] ?? $row['filename'])),
+            'mimetype' => self::clean_type((string) ($args['mimetype'] ?? $row['mimetype']))];
+        try {
+            $store->add([
+                'user_id' => $rcmail->user->ID, 'oidc_sub' => $subject,
+                'session_hash' => zemzemeh_dlp_provenance_store::session_hash($rcmail->get_session_id()),
+                'compose_id' => $compose_id, 'upload_id' => $id, 'zz_file_id' => $row['zz_file_id'],
+                'zz_owner' => $row['zz_owner'], 'zz_version' => $row['zz_version'], 'sha256' => $sha256,
+                'filename' => $attachment['name'], 'mimetype' => $attachment['mimetype'], 'size' => filesize($path),
+                'spool_name' => $name,
+            ], (int) $rcmail->config->get('zemzemeh_dlp_provenance_ttl', 28800));
+        } catch (Throwable) {
+            $spool->delete($name);
+
+            return $this->drop_saved($args, 'storage');
+        }
+        if ($source !== null && str_starts_with(basename($source), RCUBE_TEMP_FILE_PREFIX)) {
+            @unlink($source);  // Roundcube's own temp copy, superseded by the spool file
+        }
+        zemzemeh_dlp_audit::log('attachment_reproven', [
+            'compose_id' => $compose_id, 'upload_id' => $id, 'file_id' => $row['zz_file_id'],
+            'version' => $row['zz_version'], 'sha256' => $sha256, 'size' => filesize($path),
+        ]);
+
+        return ['id' => $id, 'path' => $path, 'data' => null, 'size' => filesize($path), 'status' => true,
+            'abort' => false, 'break' => true] + $attachment + $args;
+    }
+
+    private function drop_saved(array $args, string $reason): array
+    {
+        $rcmail = rcmail::get_instance();
+        zemzemeh_dlp_audit::log('blocked_send', ['hook' => 'attachment_save', 'reason' => $reason]);
+        // Tell the person composing once per request; CLI scripts have nobody to tell.
+        if ($rcmail->output && !$rcmail->output instanceof rcmail_output_cli && !$this->dropped_notice) {
+            $this->dropped_notice = true;
+            $rcmail->output->show_message($this->gettext('attachmentsdropped'), 'warning');
+        }
 
         return self::DENY + $args;
     }
@@ -463,12 +562,17 @@ class zemzemeh_dlp extends rcube_plugin
         if (!$this->inserting) {
             return self::DENY + $args;
         }
+        return ['id' => $this->new_upload_id(), 'status' => true, 'abort' => false, 'break' => true] + $args;
+    }
+
+    private function new_upload_id(): string
+    {
         $rcmail = rcmail::get_instance();
         do {
             $id = $rcmail->user->ID . random_int(100000000000, 999999999999);
         } while ($rcmail->get_uploaded_file($id));
 
-        return ['id' => $id, 'status' => true, 'abort' => false, 'break' => true] + $args;
+        return $id;
     }
 
     public function action_list(): void
