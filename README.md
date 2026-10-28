@@ -38,7 +38,9 @@ Save to Zemzemeh is a later increment; do not deploy yet. Design and plan live i
    expired approvals and spool files of ended sessions or expired approvals; a non-zero
    exit means a file could not be removed (audited as `cleanup_failed`).
 
-Full deployment guidance (Keycloak, Nginx) follows in a later task.
+Full deployment guidance (Keycloak client and scope, Zemzemeh settings, reverse proxy,
+Roundcube configuration, spool directory, validation) is in the Zemzemeh repository:
+`docs/roundcube-dlp.md`.
 
 ## Tests
 
