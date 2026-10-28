@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/lib/Audit.php';
 require_once __DIR__ . '/lib/Client.php';
+require_once __DIR__ . '/lib/Gc.php';
 require_once __DIR__ . '/lib/Guard.php';
 require_once __DIR__ . '/lib/MimeInspector.php';
 require_once __DIR__ . '/lib/ProvenanceStore.php';
@@ -68,6 +69,8 @@ class zemzemeh_dlp extends rcube_plugin
         $this->add_hook('zemzemeh_dlp_insert', [$this, 'insert_own']);
         $this->add_hook('message_before_send', [$this, 'before_send']);
         $this->add_hook('message_sent', [$this, 'sent']);
+        $this->add_hook('attachments_cleanup', [$this, 'compose_cleanup']);
+        $this->add_hook('session_destroy', [$this, 'session_cleanup']);
         $this->register_action('plugin.zemzemeh_dlp.blocked', [$this, 'blocked']);
         $this->register_action('plugin.zemzemeh_dlp.list', [$this, 'action_list']);
         $this->register_action('plugin.zemzemeh_dlp.attach', [$this, 'action_attach']);
@@ -452,6 +455,49 @@ class zemzemeh_dlp extends rcube_plugin
         }
 
         return false;
+    }
+
+    // ------------------------------------------------------------ Cleanup
+
+    /**
+     * Roundcube deletes a compose's uploads (send, Mailvelope reset); remove this plugin's
+     * spool files of that compose too, including any no longer listed as uploads.
+     */
+    public function compose_cleanup(array $args): array
+    {
+        if (!empty($args['group'])) {
+            $this->delete_spool_files((string) $args['group']);
+        }
+
+        return $args;
+    }
+
+    /**
+     * Logout. filesystem_attachments' own session cleanup lists uploads of a NULL group and
+     * removes nothing in 1.7.5, so every spool file of the session is removed here. Approvals
+     * stay until expiry so a saved draft can be re-proven after the next sign-in.
+     */
+    public function session_cleanup(array $args): array
+    {
+        $this->delete_spool_files(null);
+
+        return $args;
+    }
+
+    private function delete_spool_files(?string $compose_id): void
+    {
+        $rcmail = rcmail::get_instance();
+        $rows = (new zemzemeh_dlp_provenance_store($rcmail->get_dbh()))->for_cleanup(
+            zemzemeh_dlp_provenance_store::session_hash($rcmail->get_session_id()), $compose_id);
+        if (!$rows) {
+            return;
+        }
+        $spool = new zemzemeh_dlp_spool((string) $rcmail->config->get('temp_dir'));
+        foreach ($rows as $row) {
+            if (!$spool->delete($row['spool_name'])) {
+                zemzemeh_dlp_audit::log('cleanup_failed', ['spool_name' => $row['spool_name'], 'compose_id' => $row['compose_id']]);
+            }
+        }
     }
 
     // ------------------------------------------------------------ Attach from Zemzemeh

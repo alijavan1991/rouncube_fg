@@ -80,6 +80,24 @@ final class zemzemeh_dlp_provenance_store
         return $this->db->fetch_assoc($result) ?: null;
     }
 
+    /** Every record of a session (optionally one compose), expired and consumed included, for cleanup. */
+    public function for_cleanup(string $session_hash, ?string $compose_id = null): array
+    {
+        $sql = "SELECT * FROM {$this->table()} WHERE `session_hash` = ?";
+        $params = [$session_hash];
+        if ($compose_id !== null) {
+            $sql .= ' AND `compose_id` = ?';
+            $params[] = $compose_id;
+        }
+        $result = $this->db->query($sql, $params);
+        $rows = [];
+        while ($row = $this->db->fetch_assoc($result)) {
+            $rows[] = $row;
+        }
+
+        return $rows;
+    }
+
     public function consume(int $id): bool
     {
         $result = $this->db->query(

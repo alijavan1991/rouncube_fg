@@ -11,8 +11,10 @@ source and destination of mail attachments:
 It controls the Roundcube attachment channel only. It does not prevent copying text,
 screenshots, other mail clients or other exfiltration from the endpoint.
 
-**Status:** skeleton and test harness (delivery Task 3). The plugin loads but does not
-enforce anything yet; do not deploy it. Design and plan live in the Zemzemeh repository:
+**Status:** outgoing enforcement implemented and unit-tested (delivery Tasks 4-9):
+blocking, Attach from Zemzemeh, send-time provenance checks, draft re-proving, cleanup
+and GC. Not yet verified against a live Roundcube/Keycloak/Zemzemeh stack (Task 11), and
+Save to Zemzemeh is a later increment; do not deploy yet. Design and plan live in the Zemzemeh repository:
 `docs/superpowers/specs/2026-10-27-roundcube-zemzemeh-dlp-design.md` and
 `docs/superpowers/plans/2026-10-27-roundcube-zemzemeh-dlp.md`.
 
@@ -31,8 +33,12 @@ enforce anything yet; do not deploy it. Design and plan live in the Zemzemeh rep
 2. Copy `config.inc.php.dist` to `config.inc.php` and set `zemzemeh_dlp_api_url`.
 3. Create the table: `bin/initdb.sh --dir=plugins/zemzemeh_dlp/SQL`.
 4. Add `zemzemeh_dlp` to `$config['plugins']`.
+5. Run the cleanup every few minutes as the PHP user, e.g.
+   `*/5 * * * * php /path/to/roundcube/plugins/zemzemeh_dlp/bin/gc.php`. It removes
+   expired approvals and spool files of ended sessions or expired approvals; a non-zero
+   exit means a file could not be removed (audited as `cleanup_failed`).
 
-Full deployment guidance (Keycloak, Nginx, cron cleanup) follows in a later task.
+Full deployment guidance (Keycloak, Nginx) follows in a later task.
 
 ## Tests
 
